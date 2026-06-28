@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "visibility": "public",
+  "extensionId": "irodori.bigtable",
+  "connector": {
+    "id": "bigtable.connector",
+    "engine": "bigtable",
+    "label": "Bigtable",
+    "aliases": [
+      "bigtable",
+      "Bigtable"
+    ],
+    "defaultPort": 443,
+    "wire": "bigtable",
+    "module": "bigtable.driver",
+    "features": [
+      "metadata",
+      "streaming"
+    ]
+  },
+  "runtime": {
+    "abi": "irodori.connector.native.v1",
+    "module": {
+      "id": "bigtable.driver",
+      "path": "dist/native",
+      "platforms": [
+        "windowsX64",
+        "windowsArm64",
+        "macosX64",
+        "macosArm64",
+        "linuxX64",
+        "linuxArm64"
+      ]
+    },
+    "crate": "irodori_extension_bigtable",
+    "entrypoints": [
+      "irodori_extension_abi_version",
+      "irodori_connector_engine_json",
+      "irodori_extension_manifest_json",
+      "irodori_connector_config_json",
+      "irodori_connector_call_json",
+      "irodori_connector_free_buffer"
+    ],
+    "supportedCalls": [
+      "health",
+      "describe",
+      "manifest",
+      "config"
+    ],
+    "driverLinked": false
+  },
+  "source": {
+    "marketplaceId": "irodori.bigtable",
+    "repository": "https://github.com/hjosugi/irodori-extension-bigtable",
+    "knowledgeEngineStatus": "wired",
+    "adapter": "db/bigtable.rs",
+    "adapterSha256": "493122b104ea77074c83ab023a4643fa74832816566b9c5263072f4087217822"
+  }
+}
