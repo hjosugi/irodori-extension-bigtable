@@ -1,21 +1,27 @@
-.PHONY: build check fmt test package clean
+CARGO ?= cargo
+CARGO_TARGET_DIR ?= ../target
 
-check: fmt test
+.PHONY: build check fmt lint test package clean
+
+check: fmt lint test
 
 fmt:
-	cargo fmt --check
+	$(CARGO) fmt --check
+
+lint:
+	$(CARGO) clippy --all-targets -- -D warnings
 
 build:
-	cargo build --release
+	$(CARGO) build --release
 
 test:
-	cargo test
+	$(CARGO) test
 
 package: build
 	mkdir -p dist/native
-	cp target/release/libirodori_extension_* dist/native/ 2>/dev/null || true
-	cp target/release/irodori_extension_*.dll dist/native/ 2>/dev/null || true
-	cp target/release/libirodori_extension_*.dylib dist/native/ 2>/dev/null || true
+	cp $(CARGO_TARGET_DIR)/release/libirodori_extension_* dist/native/ 2>/dev/null || true
+	cp $(CARGO_TARGET_DIR)/release/irodori_extension_*.dll dist/native/ 2>/dev/null || true
+	cp $(CARGO_TARGET_DIR)/release/libirodori_extension_*.dylib dist/native/ 2>/dev/null || true
 
 clean:
-	cargo clean
+	$(CARGO) clean

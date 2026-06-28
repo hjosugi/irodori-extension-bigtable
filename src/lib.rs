@@ -128,6 +128,11 @@ mod tests {
         assert_eq!(connector["engine"], ENGINE);
         assert_eq!(connector["engine"], config["connector"]["engine"]);
         assert_eq!(connector["module"], config["connector"]["module"]);
+        assert_eq!(connector["connection"], config["connection"]);
+        assert!(config["connection"]["authMethods"]
+            .as_array()
+            .is_some_and(|methods| !methods.is_empty()));
+        assert!(config["connection"]["secretPurposes"].as_array().is_some());
         assert!(manifest["permissions"]
             .as_array()
             .unwrap()
