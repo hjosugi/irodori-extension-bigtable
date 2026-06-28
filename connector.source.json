@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "extensionId": "irodori.bigtable",
+  "visibility": "public",
+  "version": "0.1.0",
+  "connector": {
+    "id": "bigtable.connector",
+    "engine": "bigtable",
+    "label": "Bigtable",
+    "aliases": [
+      "bigtable",
+      "Bigtable"
+    ],
+    "defaultPort": 443,
+    "wire": "bigtable",
+    "module": "bigtable.driver",
+    "features": [
+      "metadata",
+      "streaming"
+    ]
+  },
+  "connection": {
+    "endpoint": {
+      "modes": [
+        "cloudResource",
+        "connectionString"
+      ],
+      "defaultPort": 443,
+      "fields": [
+        {
+          "id": "projectId",
+          "label": "Google Cloud project",
+          "type": "string",
+          "profileField": "host",
+          "required": true
+        },
+        {
+          "id": "instanceId",
+          "label": "Bigtable instance",
+          "type": "string",
+          "profileField": "database",
+          "required": true
+        }
+      ]
+    },
+    "authMethods": [
+      "none",
+      "connectionString",
+      "oauthAccessToken",
+      "serviceAccountJson",
+      "serviceAccountJwt",
+      "googleApplicationDefaultCredentials",
+      "oauth2",
+      "workloadIdentity",
+      "customDriverOptions"
+    ],
+    "tls": "required",
+    "transports": "default",
+    "optionNamespaces": [
+      "bigtable",
+      "googleCloud",
+      "oauth"
+    ],
+    "customDriverOptions": true
+  },
+  "runtime": {
+    "driverLinked": false
+  },
+  "source": {
+    "knowledgeEngineStatus": "wired",
+    "adapter": "db/bigtable.rs"
+  }
+}
