@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "extensionId": "irodori.bigtable",
   "visibility": "public",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "connector": {
     "id": "bigtable.connector",
     "engine": "bigtable",
@@ -49,6 +49,7 @@
       "oauthAccessToken",
       "serviceAccountJson",
       "serviceAccountJwt",
+      "serviceAccountImpersonation",
       "googleApplicationDefaultCredentials",
       "oauth2",
       "workloadIdentity",

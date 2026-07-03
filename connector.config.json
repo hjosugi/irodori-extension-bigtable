@@ -192,6 +192,35 @@
           ]
         },
         {
+          "id": "serviceAccountImpersonation",
+          "label": "Service account impersonation",
+          "kind": "iam",
+          "secretPurposes": [
+            "token"
+          ],
+          "fields": [
+            {
+              "id": "targetPrincipal",
+              "label": "Target service account",
+              "type": "string",
+              "option": "targetPrincipal",
+              "required": true
+            },
+            {
+              "id": "delegates",
+              "label": "Delegate chain",
+              "type": "list",
+              "option": "delegates"
+            },
+            {
+              "id": "subjectToken",
+              "label": "Subject token",
+              "type": "secret",
+              "secretPurpose": "token"
+            }
+          ]
+        },
+        {
           "id": "googleApplicationDefaultCredentials",
           "label": "Application Default Credentials",
           "kind": "iam",
@@ -626,6 +655,35 @@
             "label": "Private key passphrase",
             "type": "secret",
             "secretPurpose": "privateKeyPassphrase"
+          }
+        ]
+      },
+      {
+        "id": "serviceAccountImpersonation",
+        "label": "Service account impersonation",
+        "kind": "iam",
+        "secretPurposes": [
+          "token"
+        ],
+        "fields": [
+          {
+            "id": "targetPrincipal",
+            "label": "Target service account",
+            "type": "string",
+            "option": "targetPrincipal",
+            "required": true
+          },
+          {
+            "id": "delegates",
+            "label": "Delegate chain",
+            "type": "list",
+            "option": "delegates"
+          },
+          {
+            "id": "subjectToken",
+            "label": "Subject token",
+            "type": "secret",
+            "secretPurpose": "token"
           }
         ]
       },

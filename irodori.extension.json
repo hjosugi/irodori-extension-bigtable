@@ -3,7 +3,7 @@
   "manifestVersion": 1,
   "id": "irodori.bigtable",
   "name": "Bigtable Connector",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "irodori",
   "description": "Bigtable Connector contributes the Bigtable database connector through the native connector ABI.",
   "license": "MIT OR 0BSD",
@@ -207,6 +207,35 @@
                   "label": "Private key passphrase",
                   "type": "secret",
                   "secretPurpose": "privateKeyPassphrase"
+                }
+              ]
+            },
+            {
+              "id": "serviceAccountImpersonation",
+              "label": "Service account impersonation",
+              "kind": "iam",
+              "secretPurposes": [
+                "token"
+              ],
+              "fields": [
+                {
+                  "id": "targetPrincipal",
+                  "label": "Target service account",
+                  "type": "string",
+                  "option": "targetPrincipal",
+                  "required": true
+                },
+                {
+                  "id": "delegates",
+                  "label": "Delegate chain",
+                  "type": "list",
+                  "option": "delegates"
+                },
+                {
+                  "id": "subjectToken",
+                  "label": "Subject token",
+                  "type": "secret",
+                  "secretPurpose": "token"
                 }
               ]
             },

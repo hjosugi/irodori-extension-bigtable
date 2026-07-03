@@ -399,15 +399,13 @@ async fn load_metadata(connection: &BigtableConnection) -> Result<Value, String>
                 "comment": "Row Key"
             }));
             if let Some(families) = table.column_families {
-                let mut ordinal = 2;
-                for family in families.keys() {
+                for (ordinal, family) in (2..).zip(families.keys()) {
                     object.columns.push(json!({
                         "name": format!("{family}:*"),
                         "dataType": "columnFamily",
                         "nullable": true,
                         "ordinal": ordinal
                     }));
-                    ordinal += 1;
                 }
             }
         }
