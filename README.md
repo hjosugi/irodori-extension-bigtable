@@ -13,7 +13,7 @@ This crate packages the connector metadata, native ABI exports, and driver imple
 - Native ABI: `irodori.connector.native.v1`
 - Driver linked: `yes`
 - Marketplace visibility: `public`
-- Package version: `0.1.1`
+- Package version: `0.1.2`
 
 The package includes a desktop adapter source snapshot from `db/bigtable.rs`.
 
