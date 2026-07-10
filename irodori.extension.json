@@ -3,7 +3,7 @@
   "manifestVersion": 1,
   "id": "irodori.bigtable",
   "name": "Bigtable Connector",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "irodori",
   "description": "Bigtable Connector contributes the Bigtable database connector through the native connector ABI.",
   "license": "MIT OR 0BSD",
