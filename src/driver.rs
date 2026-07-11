@@ -561,9 +561,11 @@ async fn fetch_oauth2_token(
     email: &str,
     private_key: &str,
 ) -> Result<String, String> {
-    use openssl::hash::MessageDigest;
-    use openssl::pkey::PKey;
-    use openssl::sign::Signer;
+    use rsa::pkcs1v15::SigningKey;
+    use rsa::pkcs8::DecodePrivateKey;
+    use rsa::sha2::Sha256;
+    use rsa::signature::{SignatureEncoding, Signer};
+    use rsa::RsaPrivateKey;
 
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -580,16 +582,10 @@ async fn fetch_oauth2_token(
         base64_url_encode(header.as_bytes()),
         base64_url_encode(claims.as_bytes())
     );
-    let pkey = PKey::private_key_from_pem(private_key.as_bytes())
+    let pkey = RsaPrivateKey::from_pkcs8_pem(private_key)
         .map_err(|err| format!("invalid Google service account private key: {err}"))?;
-    let mut signer = Signer::new(MessageDigest::sha256(), &pkey)
-        .map_err(|err| format!("failed to initialize JWT signer: {err}"))?;
-    signer
-        .update(payload.as_bytes())
-        .map_err(|err| format!("failed to sign JWT payload: {err}"))?;
-    let signature = signer
-        .sign_to_vec()
-        .map_err(|err| format!("failed to sign JWT assertion: {err}"))?;
+    let signing_key = SigningKey::<Sha256>::new(pkey);
+    let signature = signing_key.sign(payload.as_bytes()).to_vec();
     let assertion = format!("{payload}.{}", base64_url_encode(&signature));
     let body = format!(
         "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion={assertion}"
