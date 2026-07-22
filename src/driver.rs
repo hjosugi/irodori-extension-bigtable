@@ -561,12 +561,6 @@ async fn fetch_oauth2_token(
     email: &str,
     private_key: &str,
 ) -> Result<String, String> {
-    use rsa::pkcs1v15::SigningKey;
-    use rsa::pkcs8::DecodePrivateKey;
-    use rsa::sha2::Sha256;
-    use rsa::signature::{SignatureEncoding, Signer};
-    use rsa::RsaPrivateKey;
-
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
@@ -582,10 +576,7 @@ async fn fetch_oauth2_token(
         base64_url_encode(header.as_bytes()),
         base64_url_encode(claims.as_bytes())
     );
-    let pkey = RsaPrivateKey::from_pkcs8_pem(private_key)
-        .map_err(|err| format!("invalid Google service account private key: {err}"))?;
-    let signing_key = SigningKey::<Sha256>::new(pkey);
-    let signature = signing_key.sign(payload.as_bytes()).to_vec();
+    let signature = sign_rs256(private_key, payload.as_bytes())?;
     let assertion = format!("{payload}.{}", base64_url_encode(&signature));
     let body = format!(
         "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion={assertion}"
@@ -612,6 +603,29 @@ async fn fetch_oauth2_token(
         .and_then(Value::as_str)
         .map(str::to_string)
         .ok_or_else(|| "GCP token response missing access_token.".to_string())
+}
+
+fn sign_rs256(private_key: &str, message: &[u8]) -> Result<Vec<u8>, String> {
+    use ring::rand::SystemRandom;
+    use ring::signature::{RsaKeyPair, RSA_PKCS1_SHA256};
+
+    let key = pem::parse(private_key)
+        .map_err(|_| "invalid Google service account private key PEM.".to_string())?;
+    if key.tag() != "PRIVATE KEY" {
+        return Err("Google service account private key must use PKCS#8 PEM.".to_string());
+    }
+    let key_pair = RsaKeyPair::from_pkcs8(key.contents())
+        .map_err(|_| "invalid Google service account PKCS#8 private key.".to_string())?;
+    let mut signature = vec![0; key_pair.public().modulus_len()];
+    key_pair
+        .sign(
+            &RSA_PKCS1_SHA256,
+            &SystemRandom::new(),
+            message,
+            &mut signature,
+        )
+        .map_err(|_| "Google service account JWT signing failed.".to_string())?;
+    Ok(signature)
 }
 
 fn table_id_from_request(request: &Value) -> Option<String> {
