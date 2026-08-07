@@ -5,7 +5,7 @@ publish = false
 edition = "2021"
 license = "0BSD"
 description = "Native Irodori Table connector extension for Bigtable."
-repository = "https://github.com/hjosugi/irodori-extension-bigtable"
+repository = "https://github.com/irodori-table/irodori-extension-bigtable"
 readme = "README.md"
 include = [
   "Cargo.toml",
@@ -24,7 +24,7 @@ name = "irodori_extension_bigtable"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-irodori-connector-abi = { git = "https://github.com/hjosugi/irodori-kit", tag = "v0.7.2" }
+irodori-connector-abi = { git = "https://github.com/irodori-table/irodori-kit", tag = "v0.7.2" }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 pem = "3"
 ring = "0.17"

@@ -393,7 +393,7 @@
   },
   "source": {
     "marketplaceId": "irodori.bigtable",
-    "repository": "https://github.com/hjosugi/irodori-extension-bigtable",
+    "repository": "https://github.com/irodori-table/irodori-extension-bigtable",
     "knowledgeEngineStatus": "wired",
     "adapter": "db/bigtable.rs",
     "adapterSha256": "493122b104ea77074c83ab023a4643fa74832816566b9c5263072f4087217822",
