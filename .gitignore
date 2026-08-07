@@ -3,3 +3,9 @@
 dist/*.tar.gz
 dist/native/*
 !dist/native/.gitkeep
+.claude/skills/graphify/
+.claude/settings.local.json
+.copilot/skills/graphify/
+.codex/skills/graphify/
+.codex/hooks.json
+graphify-out/
