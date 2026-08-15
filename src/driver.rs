@@ -282,7 +282,7 @@ impl BigtableConfig {
         let access_token = if let Some(key) = key.as_ref() {
             fetch_oauth2_token(&Client::new(), &key.client_email, &key.private_key).await?
         } else {
-            option_string(
+            let explicit = option_string(
                 request,
                 &[
                     "token",
@@ -292,10 +292,48 @@ impl BigtableConfig {
                     "password",
                 ],
             )
-            .or_else(|| std::env::var("GOOGLE_OAUTH_ACCESS_TOKEN").ok())
-            .ok_or_else(|| {
-                "Bigtable requires an OAuth access token or service account JSON.".to_string()
-            })?
+            .or_else(|| std::env::var("GOOGLE_OAUTH_ACCESS_TOKEN").ok());
+            // Nothing supplied: fall back to Application Default Credentials
+            // rather than refusing. On a developer machine that means the
+            // `gcloud` login already there, and on GCE/GKE/Cloud Run the
+            // metadata server, which is why ADC works with nothing configured.
+            match explicit {
+                Some(token) => token,
+                None => {
+                    fetch_adc_token(
+                        &Client::new(),
+                        "https://www.googleapis.com/auth/cloud-platform",
+                    )
+                    .await?
+                }
+            }
+        };
+        // Borrow another service account's permissions without holding its key.
+        let access_token = match option_string(
+            request,
+            &["impersonateServiceAccount", "serviceAccountImpersonation"],
+        ) {
+            Some(target) => {
+                let delegates: Vec<String> = option_string(request, &["impersonationDelegates"])
+                    .map(|value| {
+                        value
+                            .split(',')
+                            .map(str::trim)
+                            .filter(|part| !part.is_empty())
+                            .map(ToOwned::to_owned)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                impersonate_service_account(
+                    &Client::new(),
+                    &access_token,
+                    &target,
+                    "https://www.googleapis.com/auth/cloud-platform",
+                    &delegates,
+                )
+                .await?
+            }
+            None => access_token,
         };
         let project_id = option_string(request, &["projectId", "project"])
             .or_else(|| abi::profile_field(request, "host").map(str::to_string))
@@ -554,6 +592,268 @@ async fn request_text(
         return Err(format!("Bigtable returned HTTP {status}: {text}"));
     }
     Ok(text)
+}
+
+/// A credential file as Application Default Credentials stores it.
+///
+/// ADC is not one thing. `gcloud auth application-default login` writes an
+/// `authorized_user` file — a refresh token, not a key — while a service
+/// account downloaded from the console writes a `service_account` file, and
+/// workload identity federation writes `external_account`. They need three
+/// different exchanges, and reading the `type` field is the only way to know
+/// which one is in front of you.
+#[derive(Debug, PartialEq, Eq)]
+enum AdcKind {
+    ServiceAccount,
+    AuthorizedUser,
+    ExternalAccount,
+    Unknown(String),
+}
+
+fn adc_kind(document: &Value) -> AdcKind {
+    match document.get("type").and_then(Value::as_str) {
+        Some("service_account") => AdcKind::ServiceAccount,
+        Some("authorized_user") => AdcKind::AuthorizedUser,
+        Some("external_account") => AdcKind::ExternalAccount,
+        Some(other) => AdcKind::Unknown(other.to_string()),
+        None => AdcKind::Unknown(String::new()),
+    }
+}
+
+/// Where Application Default Credentials looks for a credential file.
+///
+/// `GOOGLE_APPLICATION_CREDENTIALS` first, then the well-known path
+/// `gcloud auth application-default login` writes to — the same order the
+/// Google client libraries use, so a machine already set up for `gcloud` needs
+/// no configuration here at all.
+fn adc_paths() -> Vec<String> {
+    adc_paths_from(
+        std::env::var("GOOGLE_APPLICATION_CREDENTIALS")
+            .ok()
+            .as_deref(),
+        std::env::var("CLOUDSDK_CONFIG").ok().as_deref(),
+        std::env::var("HOME").ok().as_deref(),
+    )
+}
+
+/// The search order itself, with the environment passed in.
+///
+/// Kept pure so it can be tested without `set_var`: the environment is
+/// process-global, so env-mutating tests race each other under the default
+/// parallel runner and fail in a way that looks like a logic bug.
+fn adc_paths_from(
+    explicit: Option<&str>,
+    cloudsdk_config: Option<&str>,
+    home: Option<&str>,
+) -> Vec<String> {
+    let mut paths = Vec::new();
+    if let Some(explicit) = explicit.map(str::trim).filter(|value| !value.is_empty()) {
+        paths.push(explicit.to_string());
+    }
+    let config_dir = cloudsdk_config
+        .map(str::to_string)
+        .or_else(|| home.map(|home| format!("{home}/.config/gcloud")));
+    if let Some(config_dir) = config_dir {
+        paths.push(format!("{config_dir}/application_default_credentials.json"));
+    }
+    paths
+}
+
+/// Exchange an `authorized_user` refresh token for an access token.
+async fn fetch_refresh_token_grant(
+    client: &Client,
+    client_id: &str,
+    client_secret: &str,
+    refresh_token: &str,
+) -> Result<String, String> {
+    let body = format!(
+        "grant_type=refresh_token&client_id={}&client_secret={}&refresh_token={}",
+        form_encode(client_id),
+        form_encode(client_secret),
+        form_encode(refresh_token)
+    );
+    let response = client
+        .post("https://oauth2.googleapis.com/token")
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(body)
+        .send()
+        .await
+        .map_err(|err| format!("Google token request failed: {err}"))?;
+    let status = response.status();
+    let text = response
+        .text()
+        .await
+        .map_err(|err| format!("Google token response read failed: {err}"))?;
+    if !status.is_success() {
+        return Err(format!(
+            "Google returned HTTP {status} for the token request."
+        ));
+    }
+    serde_json::from_str::<Value>(&text)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("access_token")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .ok_or_else(|| "Google token response contained no access_token.".to_string())
+}
+
+/// Resolve an access token from Application Default Credentials.
+async fn fetch_adc_token(client: &Client, scope: &str) -> Result<String, String> {
+    let mut tried = Vec::new();
+    for path in adc_paths() {
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            tried.push(path);
+            continue;
+        };
+        let document: Value = serde_json::from_str(&text)
+            .map_err(|err| format!("credential file at {path} is not valid JSON: {err}"))?;
+        return match adc_kind(&document) {
+            AdcKind::ServiceAccount => {
+                let key: GcpServiceAccountKey =
+                    serde_json::from_value(document).map_err(|err| {
+                        format!("service account file at {path} is missing fields: {err}")
+                    })?;
+                fetch_oauth2_token(client, &key.client_email, &key.private_key).await
+            }
+            AdcKind::AuthorizedUser => {
+                let field = |name: &str| {
+                    document
+                        .get(name)
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| format!("credential file at {path} is missing {name}."))
+                };
+                fetch_refresh_token_grant(
+                    client,
+                    field("client_id")?,
+                    field("client_secret")?,
+                    field("refresh_token")?,
+                )
+                .await
+            }
+            // Deliberately not guessed at: external_account is workload identity
+            // federation, which needs a token exchange this connector does not
+            // implement. Saying so beats a confusing failure three calls later.
+            AdcKind::ExternalAccount => Err(format!(
+                "the credential file at {path} is a workload identity (external_account) \
+                 credential, which this connector does not support yet. Use a service \
+                 account key or `gcloud auth application-default login`."
+            )),
+            AdcKind::Unknown(kind) => Err(format!(
+                "the credential file at {path} has an unrecognised credential type {kind:?}."
+            )),
+        };
+    }
+
+    // No file anywhere: on GCE/GKE/Cloud Run the metadata server is the
+    // credential source, and it is the reason ADC works with nothing configured.
+    fetch_metadata_token(client, scope).await.map_err(|err| {
+        if tried.is_empty() {
+            err
+        } else {
+            format!("{err} (no credential file at: {})", tried.join(", "))
+        }
+    })
+}
+
+/// Ask the GCE metadata server for a token.
+async fn fetch_metadata_token(client: &Client, scope: &str) -> Result<String, String> {
+    let host = std::env::var("GCE_METADATA_HOST")
+        .unwrap_or_else(|_| "metadata.google.internal".to_string());
+    let url = format!(
+        "http://{host}/computeMetadata/v1/instance/service-accounts/default/token?scopes={}",
+        form_encode(scope)
+    );
+    let response = client
+        .get(url)
+        .header("Metadata-Flavor", "Google")
+        .send()
+        .await
+        .map_err(|_| {
+            "no Google credentials found: set GOOGLE_APPLICATION_CREDENTIALS, run \
+             `gcloud auth application-default login`, or supply a service account key."
+                .to_string()
+        })?;
+    let text = response
+        .text()
+        .await
+        .map_err(|err| format!("metadata token response read failed: {err}"))?;
+    serde_json::from_str::<Value>(&text)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("access_token")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .ok_or_else(|| "the metadata server returned no access_token.".to_string())
+}
+
+/// Exchange a token for one belonging to another service account.
+///
+/// This is what `--impersonate-service-account` does: the caller keeps its own
+/// identity and borrows the target's permissions, so nobody has to hold the
+/// target's key.
+async fn impersonate_service_account(
+    client: &Client,
+    source_token: &str,
+    target: &str,
+    scope: &str,
+    delegates: &[String],
+) -> Result<String, String> {
+    let url = format!(
+        "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{}:generateAccessToken",
+        form_encode(target)
+    );
+    let body = serde_json::json!({
+        "scope": [scope],
+        "delegates": delegates
+            .iter()
+            .map(|d| format!("projects/-/serviceAccounts/{d}"))
+            .collect::<Vec<_>>(),
+    });
+    let response = client
+        .post(url)
+        .bearer_auth(source_token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|err| format!("impersonation request failed: {err}"))?;
+    let status = response.status();
+    let text = response
+        .text()
+        .await
+        .map_err(|err| format!("impersonation response read failed: {err}"))?;
+    if !status.is_success() {
+        return Err(format!(
+            "impersonating {target} failed with HTTP {status}. The caller needs \
+             roles/iam.serviceAccountTokenCreator on that service account."
+        ));
+    }
+    serde_json::from_str::<Value>(&text)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("accessToken")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .ok_or_else(|| "impersonation response contained no accessToken.".to_string())
+}
+
+fn form_encode(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
 }
 
 async fn fetch_oauth2_token(
@@ -826,5 +1126,74 @@ mod tests {
     fn encodes_base64_url_without_padding() {
         assert_eq!(base64_url_encode(b"abc"), "YWJj");
         assert_eq!(base64_url_encode(b"ab"), "YWI");
+    }
+
+    #[test]
+    fn recognises_each_application_default_credential_shape() {
+        // ADC is three different files needing three different exchanges, and
+        // the `type` field is the only thing that says which.
+        assert_eq!(
+            adc_kind(&json!({ "type": "service_account", "client_email": "a@b" })),
+            AdcKind::ServiceAccount
+        );
+        assert_eq!(
+            adc_kind(&json!({ "type": "authorized_user", "refresh_token": "r" })),
+            AdcKind::AuthorizedUser
+        );
+        assert_eq!(
+            adc_kind(&json!({ "type": "external_account" })),
+            AdcKind::ExternalAccount
+        );
+        assert_eq!(
+            adc_kind(&json!({ "type": "something_new" })),
+            AdcKind::Unknown("something_new".to_string())
+        );
+        assert_eq!(adc_kind(&json!({})), AdcKind::Unknown(String::new()));
+    }
+
+    #[test]
+    fn looks_for_credentials_where_gcloud_puts_them() {
+        // Matching the Google client libraries' search order means a machine
+        // already set up for `gcloud` needs no configuration here.
+        assert_eq!(
+            adc_paths_from(
+                Some("/keys/explicit.json"),
+                Some("/cfg/gcloud"),
+                Some("/home/u")
+            ),
+            vec![
+                "/keys/explicit.json".to_string(),
+                "/cfg/gcloud/application_default_credentials.json".to_string(),
+            ]
+        );
+        // Without CLOUDSDK_CONFIG the well-known path under HOME is used.
+        assert_eq!(
+            adc_paths_from(None, None, Some("/home/u")),
+            vec!["/home/u/.config/gcloud/application_default_credentials.json".to_string()]
+        );
+        // Nothing to go on: the caller falls through to the metadata server.
+        assert!(adc_paths_from(None, None, None).is_empty());
+    }
+
+    #[test]
+    fn an_empty_credentials_variable_is_not_a_path() {
+        // An exported-but-empty variable is common in shell profiles and would
+        // otherwise send the search to "".
+        assert_eq!(
+            adc_paths_from(Some("   "), Some("/cfg"), None),
+            vec!["/cfg/application_default_credentials.json".to_string()]
+        );
+    }
+
+    #[test]
+    fn form_encoding_protects_the_grant_body() {
+        // A refresh token or a service account email in a form body must not be
+        // able to introduce another parameter.
+        assert_eq!(form_encode("a&b=c"), "a%26b%3Dc");
+        assert_eq!(
+            form_encode("svc@project.iam.gserviceaccount.com"),
+            "svc%40project.iam.gserviceaccount.com"
+        );
+        assert_eq!(form_encode("plain-Token_1.0~"), "plain-Token_1.0~");
     }
 }
