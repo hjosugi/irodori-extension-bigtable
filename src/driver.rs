@@ -1,3 +1,4 @@
+use irodori_connector_abi::{option_string, percent_encode, push_sensitive};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Mutex, OnceLock};
 use std::time::SystemTime;
@@ -668,9 +669,9 @@ async fn fetch_refresh_token_grant(
 ) -> Result<String, String> {
     let body = format!(
         "grant_type=refresh_token&client_id={}&client_secret={}&refresh_token={}",
-        form_encode(client_id),
-        form_encode(client_secret),
-        form_encode(refresh_token)
+        percent_encode(client_id),
+        percent_encode(client_secret),
+        percent_encode(refresh_token)
     );
     let response = client
         .post("https://oauth2.googleapis.com/token")
@@ -764,7 +765,7 @@ async fn fetch_metadata_token(client: &Client, scope: &str) -> Result<String, St
         .unwrap_or_else(|_| "metadata.google.internal".to_string());
     let url = format!(
         "http://{host}/computeMetadata/v1/instance/service-accounts/default/token?scopes={}",
-        form_encode(scope)
+        percent_encode(scope)
     );
     let response = client
         .get(url)
@@ -805,7 +806,7 @@ async fn impersonate_service_account(
 ) -> Result<String, String> {
     let url = format!(
         "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{}:generateAccessToken",
-        form_encode(target)
+        percent_encode(target)
     );
     let body = serde_json::json!({
         "scope": [scope],
@@ -841,19 +842,6 @@ async fn impersonate_service_account(
                 .map(str::to_string)
         })
         .ok_or_else(|| "impersonation response contained no accessToken.".to_string())
-}
-
-fn form_encode(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char)
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
 }
 
 async fn fetch_oauth2_token(
@@ -1049,55 +1037,6 @@ fn connection(connection_id: &str) -> Result<BigtableConnection, IrodoriConnecto
     })
 }
 
-fn request_containers(request: &Value) -> Vec<&Value> {
-    [
-        Some(request),
-        request.get("profile"),
-        request.get("options"),
-        request.get("auth"),
-        request.get("secrets"),
-        request
-            .get("profile")
-            .and_then(|profile| profile.get("options")),
-        request
-            .get("profile")
-            .and_then(|profile| profile.get("auth")),
-        request
-            .get("profile")
-            .and_then(|profile| profile.get("secrets")),
-    ]
-    .into_iter()
-    .flatten()
-    .collect()
-}
-
-fn option_string(request: &Value, fields: &[&str]) -> Option<String> {
-    request_containers(request)
-        .into_iter()
-        .find_map(|container| {
-            fields.iter().find_map(|field| {
-                container
-                    .get(*field)
-                    .map(|value| match value {
-                        Value::String(value) => value.clone(),
-                        Value::Number(value) => value.to_string(),
-                        Value::Bool(value) => value.to_string(),
-                        _ => String::new(),
-                    })
-                    .map(|value| value.trim().to_string())
-                    .filter(|value| !value.is_empty())
-            })
-        })
-}
-
-fn push_sensitive(values: &mut Vec<String>, value: Option<&str>) {
-    if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-        if !values.iter().any(|existing| existing == value) {
-            values.push(value.to_string());
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1189,11 +1128,11 @@ mod tests {
     fn form_encoding_protects_the_grant_body() {
         // A refresh token or a service account email in a form body must not be
         // able to introduce another parameter.
-        assert_eq!(form_encode("a&b=c"), "a%26b%3Dc");
+        assert_eq!(percent_encode("a&b=c"), "a%26b%3Dc");
         assert_eq!(
-            form_encode("svc@project.iam.gserviceaccount.com"),
+            percent_encode("svc@project.iam.gserviceaccount.com"),
             "svc%40project.iam.gserviceaccount.com"
         );
-        assert_eq!(form_encode("plain-Token_1.0~"), "plain-Token_1.0~");
+        assert_eq!(percent_encode("plain-Token_1.0~"), "plain-Token_1.0~");
     }
 }
