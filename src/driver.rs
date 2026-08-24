@@ -360,15 +360,7 @@ impl BigtableConfig {
     }
 
     fn redact(&self, message: &str) -> String {
-        self.redaction_values
-            .iter()
-            .fold(message.to_string(), |message, secret| {
-                if secret.is_empty() {
-                    message
-                } else {
-                    message.replace(secret, "****")
-                }
-            })
+        abi::redact(message, &self.redaction_values)
     }
 }
 
@@ -524,7 +516,7 @@ fn read_rows_response_to_output(value: Value, cap: usize) -> QueryOutput {
                     )
                 };
                 let cell_value = String::from_utf8(current_value.clone())
-                    .unwrap_or_else(|_| format!("0x{}", hex_encode(&current_value)));
+                    .unwrap_or_else(|_| format!("0x{}", abi::hex_encode(&current_value)));
                 current_value.clear();
                 current_timestamp.clear();
                 if let Some(row) = temp_row.as_mut() {
@@ -1256,10 +1248,6 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
         }
     }
     Ok(out)
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn connection(connection_id: &str) -> Result<BigtableConnection, IrodoriConnectorBuffer> {
